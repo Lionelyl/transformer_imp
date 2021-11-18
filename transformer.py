@@ -13,7 +13,7 @@ class MultiHeadAttention(nn.Module):
         self.num_heads = num_heads
 
         self.head_dim = embed_dim // num_heads
-        assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
+        assert self.head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
 
         self.linear_q = nn.Linear(embed_dim, embed_dim, bias=False)
         self.linear_k = nn.Linear(embed_dim, embed_dim, bias=False)
@@ -30,8 +30,8 @@ class MultiHeadAttention(nn.Module):
     def forward(self, q, k, v, mask=None):
         """
         :param q: [batch_size, L, d_model]
-        :param k: [batch_size, L, d_model]
-        :param v: [batch_size, L, d_model]
+        :param k: [batch_size, S, d_model]
+        :param v: [batch_size, S, d_model]
 
         :param mask: sequence mask [1, L, L]
         """
@@ -192,6 +192,8 @@ class Transformer(nn.Module):
         decoder_layer = DecoderLayer(d_model, num_heads, dim_feedforward, dropout_rate)
         self.decoder = Decoder(decoder_layer, num_decoder_layers)
 
+        self.set_parameters()
+
     def forward(self, src, tgt, src_mask=None, tgt_mask=None, memory_mask=None):
 
         memory = self.encoder(src, src_mask)
@@ -199,6 +201,10 @@ class Transformer(nn.Module):
 
         return output
 
+    def set_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform(p)
 
 class Embeddings(nn.Module):
     def __init__(self, d_model, vocab_size):
