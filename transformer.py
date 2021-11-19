@@ -33,7 +33,9 @@ class MultiHeadAttention(nn.Module):
         :param k: [batch_size, S, d_model]
         :param v: [batch_size, S, d_model]
 
-        :param mask: sequence mask [1, L, L]
+        :param mask: encoder: src_padding_mask [B, 1, L]
+                     decoder: tgt_padding_mask & tgt_sequence_mask [B, L, L]
+                     enc_dec: memory_mask = src_padding_mask [B, 1, L]
         """
 
         d_k = self.head_dim
@@ -41,7 +43,6 @@ class MultiHeadAttention(nn.Module):
         batch_size = q.size(0)
 
         q = self.linear_q(q).view(batch_size, -1, self.num_heads, d_k)
-
         k = self.linear_k(k).view(batch_size, -1, self.num_heads, d_k)
         v = self.linear_v(v).view(batch_size, -1, self.num_heads, d_v)
 
@@ -52,9 +53,9 @@ class MultiHeadAttention(nn.Module):
         x = torch.matmul(q, k)                  # [batch_size, num_heads, len_q, len_k]
         x.mul_(self.scale)
 
-        # todo: mask, only decoder first self-attention layer have tgt_mask
+        # Mask
         if mask is not None:
-            x.masked_fill_(mask.unsqueeze(1) == 1, -1e9) # [1, 1, len_q, len_k]
+            x.masked_fill_(mask.unsqueeze(1) != 1, -1e9) # [1, 1, len_q, len_k]
 
         x = self.softmax(x)
         x = torch.matmul(x, v)                  # [batch_size, num_heads, len_q, d_v]
@@ -210,7 +211,7 @@ class Embeddings(nn.Module):
     def __init__(self, d_model, vocab_size):
         super(Embeddings, self).__init__()
 
-        self.lut = nn.Embedding(d_model, vocab_size)
+        self.lut = nn.Embedding(vocab_size, d_model)
         self.d_model = d_model
 
     def forward(self, x):
@@ -225,8 +226,7 @@ class PositionalEncoding(nn.Module):
         # Compute the positional encodings once in log space.
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) *
-                             -(math.log(10000.0) / d_model))
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)
@@ -242,7 +242,9 @@ def clone_modules(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
 def get_padding_mask(target, pad):
-    mask = (target == pad).unsqueeze(-2)  # unsqueeze(-2) ?
+
+    mask = (target != pad).unsqueeze(-2) # [batch_size, 1, tgt_len]  0 means padding
+
     return mask
 
 def get_sequence_mask(target_len):
@@ -251,7 +253,7 @@ def get_sequence_mask(target_len):
 
     mask = torch.triu(ones, diagonal=1).unsqueeze(0)   # [1, tgt_len, tgt_len]
 
-    return mask
+    return 1 - mask # lower triangular matrix: 1 means not masked, 0 means masked
 
 
 
