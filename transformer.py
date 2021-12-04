@@ -252,6 +252,7 @@ class Transformer(nn.Module):
     def __init__(self,d_model=512, num_heads=8, num_encoder_layers=6, num_decoder_layers=6,
                  dim_feedforward=2048,dropout_rate=0.1, vocab_size=30000, max_len=500):
         super(Transformer, self).__init__()
+        self.d_model = d_model
         self.embedding = Embeddings(vocab_size, d_model)
         self.position_embedding = PositionalEncoding(d_model, dropout=dropout_rate, max_len=max_len)
         self.encoder_decoder = EncoderDecoder(d_model,num_heads,num_encoder_layers,num_decoder_layers,dim_feedforward,dropout_rate)
@@ -262,6 +263,31 @@ class Transformer(nn.Module):
         x = self.generator(x)
         return x
 
+
+class OptimizerWithWarmUp():
+    def __init__(self, model_size, warmup_steps, optimizer):
+        self.d_model = model_size
+        self.warmup_steps = warmup_steps
+        self.optimizer = optimizer
+        self._rate = 0
+        self._step = 0
+
+    def rate(self, step=None):
+        if step is None:
+            step = self._step
+        return self.d_model ** (-0.5) * min(step ** (-0.5), step * self.warmup_steps ** (-1.5))
+
+    def step(self):
+        self._step += 1
+        rate = self.rate()
+        for p in self.optimizer.param_groups:
+            p['lr'] = rate
+        self._rate = rate
+        self.optimizer.step()
+
+def get_optimizer_with_warmup(model):
+    return OptimizerWithWarmUp(model_size=model.d_model, warmup_steps=4000,
+                               optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9,0.98), eps=1e-9))
 
 
 def clone_modules(module, N):
