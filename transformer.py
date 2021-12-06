@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, embed_dim=512, num_heads=8, dropout_rate=0.1):
         super(MultiHeadAttention, self).__init__()
@@ -26,13 +27,11 @@ class MultiHeadAttention(nn.Module):
 
         self.linear_out = nn.Linear(embed_dim, embed_dim, bias=False)
 
-
     def forward(self, q, k, v, mask=None):
         """
         :param q: [batch_size, L, d_model]
         :param k: [batch_size, S, d_model]
         :param v: [batch_size, S, d_model]
-
         :param mask: encoder: src_padding_mask [B, 1, L]
                      decoder: tgt_padding_mask & tgt_sequence_mask [B, S, S]
                      enc_dec: memory_mask = src_padding_mask [B, 1, L]
@@ -46,11 +45,11 @@ class MultiHeadAttention(nn.Module):
         k = self.linear_k(k).view(batch_size, -1, self.num_heads, d_k)
         v = self.linear_v(v).view(batch_size, -1, self.num_heads, d_v)
 
-        q = q.transpose(1,2)                    # [batch_size, num_heads, len_q, d_k]
-        k = k.transpose(1,2).transpose(2,3)     # [batch_size, num_heads, d_k, len_k]
-        v = v.transpose(1,2)                    # [batch_size, num_heads, len_k, d_v]
+        q = q.transpose(1, 2)  # [batch_size, num_heads, len_q, d_k]
+        k = k.transpose(1, 2).transpose(2, 3)  # [batch_size, num_heads, d_k, len_k]
+        v = v.transpose(1, 2)  # [batch_size, num_heads, len_k, d_v]
 
-        x = torch.matmul(q, k)                  # [batch_size, num_heads, len_q, len_k]
+        x = torch.matmul(q, k)  # [batch_size, num_heads, len_q, len_k]
         x.mul_(self.scale)
 
         # Mask
@@ -61,13 +60,14 @@ class MultiHeadAttention(nn.Module):
             x.masked_fill_(mask.unsqueeze(1) != 1, -1e9)
 
         x = self.softmax(x)
-        x = torch.matmul(x, v)                  # [batch_size, num_heads, len_q, d_v]
+        x = torch.matmul(x, v)  # [batch_size, num_heads, len_q, d_v]
 
-        x = x.transpose(1,2).contiguous()
+        x = x.transpose(1, 2).contiguous()
         x = x.view(batch_size, -1, self.num_heads * d_v)
 
         x = self.linear_out(x)
         return x
+
 
 class FeedForwardNetwork(nn.Module):
     def __init__(self, d_model=512, dim_feedforward=2048, dropout_rate=0.1):
@@ -84,6 +84,7 @@ class FeedForwardNetwork(nn.Module):
         x = self.linear2(x)
         return x
 
+
 class EncoderLayer(nn.Module):
     def __init__(self, d_model=512, num_heads=8, dim_feedforward=2048, dropout_rate=0.1):
         super(EncoderLayer, self).__init__()
@@ -91,7 +92,7 @@ class EncoderLayer(nn.Module):
         # multi-head attention
         self.self_attention = MultiHeadAttention(d_model, num_heads, dropout_rate)
         self.self_attention_dropout = nn.Dropout(dropout_rate)
-        self.self_attention_norm = nn.LayerNorm(d_model,  eps=1e-6)
+        self.self_attention_norm = nn.LayerNorm(d_model, eps=1e-6)
 
         # feed forward network
         self.feed_forward_network = FeedForwardNetwork(d_model, dim_feedforward, dropout_rate)
@@ -99,7 +100,6 @@ class EncoderLayer(nn.Module):
         self.feed_forward_norm = nn.LayerNorm(d_model, eps=1e-6)
 
     def forward(self, x, mask):
-
         # multi-head attention
         y = self.self_attention(x, x, x, mask)
         y = self.self_attention_dropout(y)
@@ -113,6 +113,7 @@ class EncoderLayer(nn.Module):
         x = self.feed_forward_norm(y)
 
         return x
+
 
 class Encoder(nn.Module):
     def __init__(self, encoder_layer, num_layers=6):
@@ -128,6 +129,7 @@ class Encoder(nn.Module):
             output = module(output, mask)
 
         return output
+
 
 class DecoderLayer(nn.Module):
     def __init__(self, d_model=512, num_heads=8, dim_feedforward=2048, dropout_rate=0.1):
@@ -146,7 +148,6 @@ class DecoderLayer(nn.Module):
         self.feed_forward_norm = nn.LayerNorm(d_model, eps=1e-6)
 
     def forward(self, tgt, memory, tgt_mask, memory_mask):
-
         x = tgt
 
         # self attention
@@ -169,6 +170,7 @@ class DecoderLayer(nn.Module):
 
         return x
 
+
 class Decoder(nn.Module):
     def __init__(self, decoder_layer, num_layers=6):
         super(Decoder, self).__init__()
@@ -177,7 +179,6 @@ class Decoder(nn.Module):
         self.layers = clone_modules(decoder_layer, num_layers)
 
     def forward(self, tgt, memory, tgt_mask, memory_mask):
-
         output = tgt
 
         for module in self.layers:
@@ -185,30 +186,6 @@ class Decoder(nn.Module):
 
         return output
 
-class EncoderDecoder(nn.Module):
-    def __init__(self, d_model=512, num_heads=8, num_encoder_layers=6, num_decoder_layers=6,
-                 dim_feedforward=2048,dropout_rate=0.1):
-        super(EncoderDecoder, self).__init__()
-
-        encoder_layer = EncoderLayer(d_model, num_heads, dim_feedforward, dropout_rate)
-        self.encoder = Encoder(encoder_layer, num_encoder_layers)
-
-        decoder_layer = DecoderLayer(d_model, num_heads, dim_feedforward, dropout_rate)
-        self.decoder = Decoder(decoder_layer, num_decoder_layers)
-
-        self.set_parameters()
-
-    def forward(self, src, tgt, src_mask=None, tgt_mask=None, memory_mask=None):
-
-        memory = self.encoder(src, src_mask)
-        output = self.decoder(tgt, memory, tgt_mask, memory_mask)
-
-        return output
-
-    def set_parameters(self):
-        for p in self.parameters():
-            if p.dim() > 1:
-                nn.init.xavier_uniform(p)
 
 class Embeddings(nn.Module):
     def __init__(self, vocab_size, d_model):
@@ -219,6 +196,7 @@ class Embeddings(nn.Module):
 
     def forward(self, x):
         return self.lut(x) * torch.sqrt(torch.tensor(self.d_model))
+
 
 class PositionalEncoding(nn.Module):
     # "Implement the PE function."
@@ -240,107 +218,82 @@ class PositionalEncoding(nn.Module):
                          requires_grad=False)
         return self.dropout(x)
 
+
 class Generator(nn.Module):
-    def __init__(self,d_model=512, vocab_size=37000):
+    def __init__(self, d_model=512, vocab_size=37000):
         super(Generator, self).__init__()
         self.proj = nn.Linear(d_model, vocab_size)
 
     def forward(self, x):
         return F.log_softmax(self.proj(x), dim=-1)
 
+
 class Transformer(nn.Module):
-    def __init__(self,d_model=512, num_heads=8, num_encoder_layers=6, num_decoder_layers=6,
-                 dim_feedforward=2048,dropout_rate=0.1, vocab_size=30000, max_len=500):
+    def __init__(self, d_model=512, num_heads=8, num_encoder_layers=6, num_decoder_layers=6,
+                 dim_feedforward=2048, dropout_rate=0.1, src_vocab_size=30000, tgt_vocab_size=30000, max_len=500):
         super(Transformer, self).__init__()
-        self.d_model = d_model
-        self.embedding = Embeddings(vocab_size, d_model)
+        self.src_embedding = Embeddings(src_vocab_size, d_model)
+        self.tgt_embedding = Embeddings(tgt_vocab_size, d_model)
         self.position_embedding = PositionalEncoding(d_model, dropout=dropout_rate, max_len=max_len)
-        self.encoder_decoder = EncoderDecoder(d_model,num_heads,num_encoder_layers,num_decoder_layers,dim_feedforward,dropout_rate)
-        self.generator = Generator(d_model, vocab_size)
+        # self.encoder_decoder = EncoderDecoder(d_model, num_heads, num_encoder_layers, num_decoder_layers,
+        #                                       dim_feedforward, dropout_rate)
+        encoder_layer = EncoderLayer(d_model, num_heads, dim_feedforward, dropout_rate)
+        self.encoder = Encoder(encoder_layer, num_encoder_layers)
+
+        decoder_layer = DecoderLayer(d_model, num_heads, dim_feedforward, dropout_rate)
+        self.decoder = Decoder(decoder_layer, num_decoder_layers)
+
+        self.set_parameters()
+        self.generator = Generator(d_model, tgt_vocab_size)
 
     def forward(self, src, tgt, src_mask, tgt_mask):
-        x = self.encoder_decoder(self.position_embedding(self.embedding(src)), self.position_embedding(self.embedding(tgt)), src_mask, tgt_mask, src_mask)
-        x = self.generator(x)
+        memory_mask = src_mask
+        memory = self.encoder(self.position_embedding(self.src_embedding(src)), src_mask)
+        output = self.decoder(self.position_embedding(self.tgt_embedding(tgt)), memory, tgt_mask, memory_mask)
+        x = self.generator(output)
         return x
 
+    def set_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
 
-class OptimizerWithWarmUp():
-    def __init__(self, model_size, warmup_steps, optimizer):
-        self.d_model = model_size
-        self.warmup_steps = warmup_steps
-        self.optimizer = optimizer
-        self._rate = 0
-        self._step = 0
+    def encode(self, src, src_mask):
+        return self.encoder(self.position_embedding(self.src_embedding(src)), src_mask)
 
-    def rate(self, step=None):
-        if step is None:
-            step = self._step
-        return self.d_model ** (-0.5) * min(step ** (-0.5), step * self.warmup_steps ** (-1.5))
-
-    def step(self):
-        self._step += 1
-        rate = self.rate()
-        for p in self.optimizer.param_groups:
-            p['lr'] = rate
-        self._rate = rate
-        self.optimizer.step()
-
-def get_optimizer_with_warmup(model):
-    return OptimizerWithWarmUp(model_size=model.d_model, warmup_steps=4000,
-                               optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9,0.98), eps=1e-9))
+    def decode(self, tgt, memory, memory_mask, tgt_mask):
+        return self.decoder(self.position_embedding(self.tgt_embedding(tgt)), memory, tgt_mask, memory_mask)
 
 
 def clone_modules(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
-def get_padding_mask(target, pad):
 
-    mask = (target != pad).unsqueeze(-2) # [batch_size, 1, tgt_len]  0 means padding
+# 得到的都是True和False的矩阵
+def get_padding_mask(target, pad):
+    mask = (target != pad).unsqueeze(-2)  # [batch_size, 1, tgt_len]  0 means padding
 
     return mask
 
-def get_sequence_mask(target_len):
 
-    ones = torch.ones(target_len, target_len, dtype=torch.uint8)
+# 返回上三角为0的矩阵，其余元素为1的矩阵,工具函数
+def get_sequence_mask(target_len, DEVICE):
+    ones = torch.ones(target_len, target_len, dtype=torch.uint8).to(DEVICE)
 
-    mask = torch.triu(ones, diagonal=1) # [tgt_len, tgt_len]
+    mask = torch.triu(ones, diagonal=1)  # [tgt_len, tgt_len]
 
-    return 1 - mask # lower triangular matrix: 1 means not masked, 0 means masked
+    return 1 - mask  # lower triangular matrix: 1 means not masked, 0 means masked
 
-def get_tgt_mask(padding_mask, tgt_len):
+
+def get_tgt_mask(padding_mask, tgt_len, DEVICE):
     # padding_mask: list, len(list) = S
-
-    padding_mask = torch.tensor(padding_mask).unsqueeze(0)
-    seq_mask = get_sequence_mask(tgt_len)
+    seq_mask = get_sequence_mask(tgt_len, DEVICE)
     tgt_mask = padding_mask & seq_mask
     return tgt_mask
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# 添加mask构造，返回上三角为-inf，其余元素为0的矩阵
+def generate_square_subsequent_mask(sz, DEVICE):
+    mask = (torch.triu(torch.ones((sz, sz), device=DEVICE)) == 1).transpose(0, 1)
+    mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+    return mask
