@@ -196,7 +196,7 @@ class EncoderDecoder(nn.Module):
         decoder_layer = DecoderLayer(d_model, num_heads, dim_feedforward, dropout_rate)
         self.decoder = Decoder(decoder_layer, num_decoder_layers)
 
-        self.set_parameters()
+        # self.set_parameters()
 
     def forward(self, src, tgt, src_mask=None, tgt_mask=None, memory_mask=None):
 
@@ -205,10 +205,19 @@ class EncoderDecoder(nn.Module):
 
         return output
 
+    def encode(self, src, src_mask):
+        return self.encoder(src, src_mask)
+
+    def decode(self, tgt, memory, tgt_mask, memory_mask):
+        # print(tgt.shape)
+        # print(memory.shape)
+        return self.decoder(tgt, memory, tgt_mask, memory_mask)
+
     def set_parameters(self):
         for p in self.parameters():
             if p.dim() > 1:
-                nn.init.xavier_uniform(p)
+                nn.init.xavier_uniform_(p)
+
 
 class Embeddings(nn.Module):
     def __init__(self, vocab_size, d_model):
@@ -258,11 +267,23 @@ class Transformer(nn.Module):
         self.encoder_decoder = EncoderDecoder(d_model,num_heads,num_encoder_layers,num_decoder_layers,dim_feedforward,dropout_rate)
         self.generator = Generator(d_model, vocab_size)
 
+        self.set_parameters()
+
     def forward(self, src, tgt, src_mask, tgt_mask):
         x = self.encoder_decoder(self.position_embedding(self.embedding(src)), self.position_embedding(self.embedding(tgt)), src_mask, tgt_mask, src_mask)
         x = self.generator(x)
         return x
 
+    def encode(self, src, src_mask):
+        return self.encoder_decoder.encode(self.position_embedding(self.embedding(src)), src_mask)
+
+    def decode(self, tgt, memory, tgt_mask, memory_mask):
+        return self.encoder_decoder.decode(self.position_embedding(self.embedding(tgt)), memory, tgt_mask, memory_mask)
+
+    def set_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
 
 class OptimizerWithWarmUp():
     def __init__(self, model_size, warmup_steps, optimizer):
@@ -284,6 +305,9 @@ class OptimizerWithWarmUp():
             p['lr'] = rate
         self._rate = rate
         self.optimizer.step()
+
+    def zero_grad(self):
+        self.optimizer.zero_grad()
 
 def get_optimizer_with_warmup(model):
     return OptimizerWithWarmUp(model_size=model.d_model, warmup_steps=4000,
@@ -314,7 +338,6 @@ def get_tgt_mask(padding_mask, tgt_len):
     seq_mask = get_sequence_mask(tgt_len)
     tgt_mask = padding_mask & seq_mask
     return tgt_mask
-
 
 
 
