@@ -58,15 +58,15 @@ class TransformerDataset(Dataset):
         if self.mode == 'test':
             src_ids = self.src[id].ids
             src_mask = self.src[id].attention_mask
-            src_mask = torch.tensor(src_mask, dtype=int).unsqueeze(0)
-            src = {'data':torch.tensor(src_ids, dtype=int), 'mask':src_mask}
+            src_mask = torch.tensor(src_mask, dtype=torch.int).unsqueeze(0)
+            src = {'data':torch.tensor(src_ids, dtype=torch.int), 'mask':src_mask}
             return src
         else:
             # tgt_sos_padding = torch.ones(len(self.tgt)).type(torch.int) # '<sos>' 1
             # label_eos_padding = tgt_sos_padding + tgt_sos_padding      # '<eos>' 2
             src_ids = self.src[id].ids
             src_mask = self.src[id].attention_mask
-            src_mask = torch.tensor(src_mask, dtype=int).unsqueeze(0)
+            src_mask = torch.tensor(src_mask, dtype=torch.int).unsqueeze(0)
             tgt_ids = [1] + self.tgt[id].ids
             tgt_mask = [1] + self.tgt[id].attention_mask
             tgt_mask = transformer.get_tgt_mask(tgt_mask, len(tgt_mask))
@@ -74,18 +74,18 @@ class TransformerDataset(Dataset):
             label_ids = self.tgt[id].ids + [2]
             # label_mask = self.tgt[id].attention_mask + [1]
 
-            src = {'data':torch.tensor(src_ids, dtype=int), 'mask':src_mask}
-            tgt = {'data':torch.tensor(tgt_ids, dtype=int), 'mask':tgt_mask}
-            label = torch.tensor(label_ids, dtype=int)
+            src = {'data':torch.tensor(src_ids, dtype=torch.int), 'mask':src_mask}
+            tgt = {'data':torch.tensor(tgt_ids, dtype=torch.int), 'mask':tgt_mask}
+            label = torch.tensor(label_ids, dtype=torch.int)
             return src, tgt, label
 
     def __len__(self):
         return len(self.src)
 
-train_src_paths = [str(x) for x in Path('./de_en_data_s').glob('train*en.txt')]
-train_tgt_paths = [str(x) for x in Path('./de_en_data_s').glob('train*de.txt')]
-valid_src_paths = [str(x) for x in Path('./de_en_data_s').glob('valid*en.txt')]
-valid_tgt_paths = [str(x) for x in Path('./de_en_data_s').glob('valid*de.txt')]
+train_src_paths = [str(x) for x in Path('./de_en_data_s').glob('train*de.txt')]
+train_tgt_paths = [str(x) for x in Path('./de_en_data_s').glob('train*en.txt')]
+valid_src_paths = [str(x) for x in Path('./de_en_data_s').glob('valid*de.txt')]
+valid_tgt_paths = [str(x) for x in Path('./de_en_data_s').glob('valid*en.txt')]
 
 
 tr_set = TransformerDataset(train_src_paths, train_tgt_paths, tokenizer)
@@ -103,7 +103,7 @@ print(device)
 
 model_path = './models/model.ckpt'
 
-n_epochs = 1000
+n_epochs = 100
 early_stop = 10
 
 d_model = 512
@@ -112,9 +112,9 @@ d_model = 512
 model = transformer.Transformer(d_model=d_model,vocab_size=vocab_size).to(device)
 # model.load_state_dict(torch.load(model_path))
 
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.0003, weight_decay=1e-5)
-optimizer = transformer.get_optimizer_with_warmup(model)
-criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0, betas=(0.9,0.98), eps=1e-9)
+optimizer = transformer.OptimizerWithWarmUp(d_model,8000, optimizer)
+criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
 epoch = 0
 early_stop_cnt = 0
