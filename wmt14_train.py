@@ -109,7 +109,7 @@ early_stop = 10
 d_model = 512
 #max_len = 202
 
-model = transformer.Transformer(d_model=d_model,vocab_size=vocab_size).to(device)
+model = transformer.Transformer(d_model=d_model,src_vocab_size=vocab_size, tgt_vocab_size=vocab_size,share_embedding=True).to(device)
 # model.load_state_dict(torch.load(model_path))
 
 optimizer = torch.optim.Adam(model.parameters(), lr=0, betas=(0.9,0.98), eps=1e-9)

@@ -274,7 +274,7 @@ class Transformer(nn.Module):
         self.set_parameters()
 
     def forward(self, src, tgt, src_mask, tgt_mask):
-        x = self.encoder_decoder(self.position_embedding(self.embedding(src)), self.position_embedding(self.embedding(tgt)), src_mask, tgt_mask, src_mask)
+        x = self.encoder_decoder(self.position_embedding(self.src_embedding(src)), self.position_embedding(self.tgt_embedding(tgt)), src_mask, tgt_mask, src_mask)
         x = self.generator(x)
         return x
 
@@ -340,7 +340,7 @@ def get_sequence_mask(target_len):
 
 def get_tgt_mask(padding_mask, tgt_len):
     # padding_mask: list, len(list) = S
-    if padding_mask is isinstance(list):
+    if isinstance(padding_mask, list):
         padding_mask = torch.tensor(padding_mask).unsqueeze(0)
     seq_mask = get_sequence_mask(tgt_len)
     tgt_mask = padding_mask & seq_mask
