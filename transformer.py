@@ -258,14 +258,18 @@ class Generator(nn.Module):
         return F.log_softmax(self.proj(x), dim=-1)
 
 class Transformer(nn.Module):
-    def __init__(self,d_model=512, num_heads=8, num_encoder_layers=6, num_decoder_layers=6,
-                 dim_feedforward=2048,dropout_rate=0.1, vocab_size=30000, max_len=500):
+    def __init__(self, d_model=512, num_heads=8, num_encoder_layers=6, num_decoder_layers=6,
+                 dim_feedforward=2048, dropout_rate=0.1, src_vocab_size=30000, tgt_vocab_size=30000, max_len=500, share_embedding=False):
         super(Transformer, self).__init__()
         self.d_model = d_model
-        self.embedding = Embeddings(vocab_size, d_model)
+        self.src_embedding = Embeddings(src_vocab_size, d_model)
+        if share_embedding:
+            self.tgt_embedding = self.src_embedding
+        else:
+            self.tgt_embedding = Embeddings(tgt_vocab_size, d_model)
         self.position_embedding = PositionalEncoding(d_model, dropout=dropout_rate, max_len=max_len)
         self.encoder_decoder = EncoderDecoder(d_model,num_heads,num_encoder_layers,num_decoder_layers,dim_feedforward,dropout_rate)
-        self.generator = Generator(d_model, vocab_size)
+        self.generator = Generator(d_model, tgt_vocab_size)
 
         self.set_parameters()
 
@@ -275,10 +279,10 @@ class Transformer(nn.Module):
         return x
 
     def encode(self, src, src_mask):
-        return self.encoder_decoder.encode(self.position_embedding(self.embedding(src)), src_mask)
+        return self.encoder_decoder.encode(self.position_embedding(self.src_embedding(src)), src_mask)
 
     def decode(self, tgt, memory, tgt_mask, memory_mask):
-        return self.encoder_decoder.decode(self.position_embedding(self.embedding(tgt)), memory, tgt_mask, memory_mask)
+        return self.encoder_decoder.decode(self.position_embedding(self.tgt_embedding(tgt)), memory, tgt_mask, memory_mask)
 
     def set_parameters(self):
         for p in self.parameters():
@@ -317,12 +321,15 @@ def get_optimizer_with_warmup(model):
 def clone_modules(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
 
+
+# 得到的都是True和False的矩阵
 def get_padding_mask(target, pad):
 
     mask = (target != pad).unsqueeze(-2) # [batch_size, 1, tgt_len]  0 means padding
 
     return mask
 
+# 返回上三角为0的矩阵，其余元素为1的矩阵,工具函数
 def get_sequence_mask(target_len):
 
     ones = torch.ones(target_len, target_len, dtype=torch.uint8)
@@ -333,37 +340,15 @@ def get_sequence_mask(target_len):
 
 def get_tgt_mask(padding_mask, tgt_len):
     # padding_mask: list, len(list) = S
-
-    padding_mask = torch.tensor(padding_mask).unsqueeze(0)
+    if padding_mask is isinstance(list):
+        padding_mask = torch.tensor(padding_mask).unsqueeze(0)
     seq_mask = get_sequence_mask(tgt_len)
     tgt_mask = padding_mask & seq_mask
     return tgt_mask
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# 添加mask构造，返回上三角为-inf，其余元素为0的矩阵
+def generate_square_subsequent_mask(sz, DEVICE):
+    mask = (torch.triu(torch.ones((sz, sz), device=DEVICE)) == 1).transpose(0, 1)
+    mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+    return mask
