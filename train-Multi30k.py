@@ -9,6 +9,7 @@ from typing import Iterable, List
 from transformer import Transformer
 from transformer import get_padding_mask
 from transformer import get_tgt_mask
+from transformer import OptimizerWithWarmUp
 from torch.nn.utils.rnn import pad_sequence
 import torch
 import torch.nn as nn
@@ -141,9 +142,10 @@ transformer = Transformer(EMB_SIZE, NHEAD, NUM_ENCODER_LAYERS, NUM_DECODER_LAYER
 transformer = transformer.to(DEVICE)
 # 损失函数
 # padding的不是真正的词语，要忽略掉 ignore_index=PAD_IDX
-loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
+loss_fn = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX, label_smoothing=0.1)
 # Adam优化算法
 optimizer = torch.optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
+optimizer = OptimizerWithWarmUp(EMB_SIZE, 4000, optimizer)
 
 
 def train_epoch(model, optimizer):
@@ -163,16 +165,17 @@ def train_epoch(model, optimizer):
         tgt = tgt.t()
         # 如果GPU可用放在GPU上
         src = src.to(DEVICE)
-        tgt = tgt.to(DEVICE)
         # 省去最后一个结尾特殊标志
         tgt_input = tgt[:, :-1]
         # 获取Mask矩阵
         src_mask = get_padding_mask(src, PAD_IDX)
         src_mask = src_mask.to(DEVICE)
         tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)
-        tgt_padding_mask = tgt_padding_mask.to(DEVICE)
-        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1), DEVICE)
+        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))
         tgt_mask = tgt_mask.to(DEVICE)
+        tgt_input = tgt_input.to(DEVICE)
+        tgt = tgt.to(DEVICE)
+        # tgt_padding_mask = tgt_padding_mask.to(DEVICE)
         # print("src_mask:", src_mask.shape)
         # print("tgt_mask:", tgt_mask.shape)
         # 获取模型的输出
@@ -208,12 +211,15 @@ def evaluate(model):
         src = src.t()  # batch first
         tgt = tgt.t()
         src = src.to(DEVICE)
-        tgt = tgt.to(DEVICE)
+
         tgt_input = tgt[:, :-1]
         # 获取Mask矩阵
         src_mask = get_padding_mask(src, PAD_IDX)
         tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)
-        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1), DEVICE)
+        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))
+        tgt_mask = tgt_mask.to(DEVICE)
+        tgt_input = tgt_input.to(DEVICE)
+        tgt = tgt.to(DEVICE)
         # 开始训练
         logits = model(src, tgt_input, src_mask, tgt_mask)
         tgt_out = tgt[:, 1:]
@@ -238,12 +244,15 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
     src = src.to(DEVICE)
     src_mask = src_mask.to(DEVICE)
     memory = model.encode(src, src_mask)
-    ys = torch.ones(1, 1).fill_(start_symbol).type(torch.long).to(DEVICE)
+    ys = torch.ones(1, 1).fill_(start_symbol).type(torch.long)
     for i in range(max_len - 1):
         memory = memory.to(DEVICE)
+        ys = ys.to("cpu")
         tgt_padding_mask = get_padding_mask(ys, PAD_IDX)
-        tgt_mask = get_tgt_mask(tgt_padding_mask, ys.size(1), DEVICE)  # 这里应该写ys.size(1)嘛
-        out = model.decode(ys, memory, src_mask, tgt_mask)
+        ys = ys.to(DEVICE)
+        tgt_mask = get_tgt_mask(tgt_padding_mask, ys.size(1))
+        tgt_mask = tgt_mask.to(DEVICE)
+        out = model.decode(ys, memory, tgt_mask, src_mask)
         prob = model.generator(out[:, -1])
         _, next_word = torch.max(prob, dim=1)
         next_word = next_word.item()
@@ -269,9 +278,15 @@ def translate(model: torch.nn.Module, src_sentence: str):
 
 
 # 将德语翻译为英语
-print(translate(transformer, "Eine Gruppe von Menschen steht vor einem Iglu ."))
-print(translate(transformer,
-                "Eine Turnerin in einem schwarzen Turnanzug，als er durch einen hübschen Blumenmarkt schlendert."))
+print("短句：")
 print(translate(transformer, "ein Hund springt in einen See."))
 print(translate(transformer, "Arbeiter stehen vor einer Landstraße."))
-print(translate(transformer, "Du hast übermorgen Geburtstag, stimmt's ?"))
+print(translate(transformer, "Ein Baseballspieler erklimmt einen Berg."))
+print(translate(transformer, "Ein Mann mit einem orangefarbenen Hut, der etwas anstarrt."))
+print(translate(transformer, "Eine Gruppe von Menschen steht vor einem Iglu ."))
+print(translate(transformer, "Eine Frau mit rötlichen Haaren springt auf eine aufblasbare Rutsche."))
+print("长句：")
+print(translate(transformer,
+                "Eine Turnerin in einem schwarzen Turnanzug，als er durch einen hübschen Blumenmarkt schlendert."))
+print(translate(transformer, "Dieses Foto zeigt einen Mann und eine Frau, die vor einer Wand stehen."))
+print(translate(transformer, "Leute Reparieren das Dach eines Hauses."))
