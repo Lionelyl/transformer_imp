@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from timeit import default_timer as timer
+from nltk.translate.bleu_score import sentence_bleu
 
 
 # 用于产生build_vocab_from_iterator中的迭代器
@@ -277,16 +278,45 @@ def translate(model: torch.nn.Module, src_sentence: str):
         "<eos>", "")
 
 
-# 将德语翻译为英语
-print("短句：")
-print(translate(transformer, "ein Hund springt in einen See."))
-print(translate(transformer, "Arbeiter stehen vor einer Landstraße."))
-print(translate(transformer, "Ein Baseballspieler erklimmt einen Berg."))
-print(translate(transformer, "Ein Mann mit einem orangefarbenen Hut, der etwas anstarrt."))
-print(translate(transformer, "Eine Gruppe von Menschen steht vor einem Iglu ."))
-print(translate(transformer, "Eine Frau mit rötlichen Haaren springt auf eine aufblasbare Rutsche."))
-print("长句：")
-print(translate(transformer,
-                "Eine Turnerin in einem schwarzen Turnanzug，als er durch einen hübschen Blumenmarkt schlendert."))
-print(translate(transformer, "Dieses Foto zeigt einen Mann und eine Frau, die vor einer Wand stehen."))
-print(translate(transformer, "Leute Reparieren das Dach eines Hauses."))
+# 计算Blue Score
+# 首先读取测试集中的德语数据
+de_sent = []
+with open('.data/multi30k/test.de', encoding='utf-8') as f:
+    for line in f:
+        lst_temp = [line.strip('\n')]
+        de_sent.append(lst_temp)
+en_candidate_list = []  # 将翻译之后的英文存储在该列表中
+for de in de_sent:
+    en_candidate_list.append(translate(transformer, de[0]))
+print("翻译结束")
+print(en_candidate_list[:5])
+en_candidate_list_tokenize = []  # 将翻译之后的英文分词后结果
+for sents in en_candidate_list:
+    res = token_transform[TGT_LANGUAGE](sents)
+    en_candidate_list_tokenize.append(res)
+print(en_candidate_list_tokenize[:5])
+
+# 读取测试集中英语数据存储在reference
+en_sent = []
+with open('.data/multi30k/test.en', encoding='utf-8') as f:
+    for line in f:
+        lst_temp = [line.strip('\n')]
+        en_sent.append(lst_temp)
+
+print(len(en_sent))
+en_sent_tokenize = []
+for sents in en_sent:
+    res = token_transform[TGT_LANGUAGE](sents[0])
+    en_sent_tokenize.append(res)
+
+# 计算Blue评分
+i = 0
+total_blue_score = 0
+for candidate in en_candidate_list_tokenize:
+    reference = [en_sent_tokenize[i]]
+    print("reference为：", reference)
+    print("candidate为：", candidate)
+    score = sentence_bleu(reference, candidate) * 100
+    total_blue_score += score
+    i += 1
+print("测试集中平均的Blue score为：", total_blue_score / i)
