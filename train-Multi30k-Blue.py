@@ -314,9 +314,7 @@ i = 0
 total_blue_score = 0
 for candidate in en_candidate_list_tokenize:
     reference = [en_sent_tokenize[i]]
-    print("reference为：", reference)
-    print("candidate为：", candidate)
-    score = sentence_bleu(reference, candidate) * 100
+    score = sentence_bleu(reference, candidate[1:]) * 100
     total_blue_score += score
     i += 1
 print("测试集中平均的Blue score为：", total_blue_score / i)
