@@ -103,7 +103,7 @@ max_len = 202
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 model_path = './models/model.ckpt'
-model = transformer.Transformer(d_model=d_model,vocab_size=vocab_size).to(device)
+model = transformer.Transformer(d_model=d_model,src_vocab_size=vocab_size, tgt_vocab_size=vocab_size, share_embedding=True).to(device)
 # model.load_state_dict(torch.load(model_path))
 
 
@@ -140,18 +140,20 @@ with tqdm(tt_loader) as t:
     scores = []
     for data in t:
         src = data['data'].to(device)
-        print(tokenizer.decode(data['data'].squeeze().tolist()))
+        # print(tokenizer.decode(data['data'].squeeze().tolist()))
         src_mask = data['mask'].to(device)
         out = greed_decode(model, src, src_mask, max_len, sos_id, eos_id)
-        print(tokenizer.decode(out.squeeze().tolist()))
-
-        # reference = [tokenizer.decode(data['data'].squeeze().tolist())]
-        # candidate = tokenizer.decode(out.squeeze().tolist())
-        # score = bleu_score.corpus_bleu(reference,candidate)
-        # print(score)
-        # scores.append(score)
-        # if (i>2):
-        #     break
-        # i += 1
-    # average_bleu = sum(scores) / len(scores)
-    # print(f"BLEU scores : {average_bleu:3.6f}")
+        # print(tokenizer.decode(out.squeeze().tolist()))
+        reference = tokenizer.decode(data['data'].squeeze().tolist())
+        reference = [tokenizer.encode(reference).tokens]
+        print(reference)
+        candidate = [tokenizer.encode(tokenizer.decode(out.squeeze().tolist())).tokens]
+        print(candidate)
+        score = bleu_score.corpus_bleu(reference, candidate)
+        print(score)
+        scores.append(score)
+        if (i>2):
+            break
+        i += 1
+    average_bleu = sum(scores) / len(scores)
+    print(f"BLEU scores : {average_bleu:3.6f}")

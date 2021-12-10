@@ -127,30 +127,25 @@ while(epoch < n_epochs and early_stop_cnt < early_stop):
 
     train_loss = []
     train_acc = []
-    try:
-        with tqdm(train_loader) as t:
-            for src, tgt, labels in t:
-                # tgt [B, S]  tgt_mask [B, S]
-                logits = model(src['data'].to(device), tgt['data'].to(device), src['mask'].to(device), tgt['mask'].to(device) )
+    with tqdm(train_loader) as t:
+        for src, tgt, labels in t:
+            # tgt [B, S]  tgt_mask [B, S]
+            logits = model(src['data'].to(device), tgt['data'].to(device), src['mask'].to(device), tgt['mask'].to(device) )
 
-                # labels = labels.unsqueeze(-1)
-                loss = criterion(logits.view(-1,logits.shape[-1]), labels.view(-1).to(device))
+            # labels = labels.unsqueeze(-1)
+            loss = criterion(logits.view(-1,logits.shape[-1]), labels.view(-1).to(device))
 
-                optimizer.zero_grad()
+            optimizer.zero_grad()
 
-                loss.backward()
+            loss.backward()
 
-                nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
-                # update parameters
-                optimizer.step()
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=10)
+            # update parameters
+            optimizer.step()
 
-                acc = (torch.argmax(logits, dim=-1) == labels.to(device)).float().mean()
-                train_loss.append(loss.item())
-                train_acc.append(acc)
-    except KeyboardInterrupt:
-        t.close()
-        raise
-    t.close()
+            acc = (torch.argmax(logits, dim=-1) == labels.to(device)).float().mean()
+            train_loss.append(loss.item())
+            train_acc.append(acc)
 
     train_loss = sum(train_loss) / len(train_loss)
     train_acc = sum(train_acc) / len(train_acc)
@@ -162,17 +157,19 @@ while(epoch < n_epochs and early_stop_cnt < early_stop):
 
     val_loss = []
     val_acc = []
+    val_src = ""
+    val_tgt = ""
 
     try:
         with tqdm(val_loader) as t:
             for src, tgt, labels in t:
                 logits = model(src['data'].to(device), tgt['data'].to(device), src['mask'].to(device), tgt['mask'].to(device))
 
-            loss = criterion(logits.view(-1,logits.shape[-1]), labels.view(-1).to(device))
+                loss = criterion(logits.view(-1,logits.shape[-1]), labels.view(-1).to(device))
 
-            acc = (torch.argmax(logits, dim=-1) == labels.to(device)).float().mean()
-            val_loss.append(loss.item())
-            val_acc.append(acc)
+                acc = (torch.argmax(logits, dim=-1) == labels.to(device)).float().mean()
+                val_loss.append(loss.item())
+                val_acc.append(acc)
     except KeyboardInterrupt:
         t.close()
         raise
@@ -188,6 +185,7 @@ while(epoch < n_epochs and early_stop_cnt < early_stop):
         min_loss = val_loss
         torch.save(model.state_dict(), model_path)
         print(f"saving model with loss {val_loss:3.6f}")
+
         early_stop_cnt = 0
 
     else:
