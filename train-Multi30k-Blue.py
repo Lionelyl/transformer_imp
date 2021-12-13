@@ -162,34 +162,29 @@ def train_epoch(model, optimizer):
     # 训练
     for src, tgt in train_dataloader:
         i += 1
-        src = src.t()  # batch first
-        tgt = tgt.t()
+        src = src.t()  # batch first, shape:[batch_size, src_seq_len]
+        tgt = tgt.t()  # batch first, shape:[batch_size, tgt_seq_len]
         # 如果GPU可用放在GPU上
         src = src.to(DEVICE)
         # 省去最后一个结尾特殊标志
-        tgt_input = tgt[:, :-1]
+        tgt_input = tgt[:, :-1]  # [batch_size, src_seq_len-1]
         # 获取Mask矩阵
-        src_mask = get_padding_mask(src, PAD_IDX)
+        src_mask = get_padding_mask(src, PAD_IDX)  # [batch_size, 1, src_seq_len]
         src_mask = src_mask.to(DEVICE)
-        tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)
-        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))
+        tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)  # [batch_size, 1, src_seq_len-1]
+        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))  # [tgt_seq_len-1, tgt_seq_len-1]
         tgt_mask = tgt_mask.to(DEVICE)
         tgt_input = tgt_input.to(DEVICE)
         tgt = tgt.to(DEVICE)
         # tgt_padding_mask = tgt_padding_mask.to(DEVICE)
-        # print("src_mask:", src_mask.shape)
-        # print("tgt_mask:", tgt_mask.shape)
         # 获取模型的输出
-        # logits是没有经过softmax的模型输出的意思
         logits = model(src, tgt_input, src_mask, tgt_mask)  # [B, L-1, TGT_VOCAB_SIZE]
-        # print(logits.shape)
         # 梯度清零
         optimizer.zero_grad()
-        # 第一个是开始特殊标记
-        # 省去
+        # 省去第一个开始特殊标记
         tgt_out = tgt[:, 1:]  # [B, L-1]
         # logits.reshape(-1, logits.shape[-1])后维度变为[(seq_len-1)*batch_size,目标语言的词典大小]
-        # tgt_out.reshape(-1)后tgt_out的维度是[seq_len-1*batch_size*目标语言的词典大小]
+        # tgt_out.reshape(-1)后tgt_out的维度是[seq_len-1*batch_size]
         # tgt_out的最后一个维度是真实标签
         # 而logits的最后一个维度是对于每一个词语的预测
         loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_out.reshape(-1))
@@ -209,27 +204,27 @@ def evaluate(model):
     val_iter = Multi30k(split='valid', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
     val_dataloader = DataLoader(val_iter, batch_size=BATCH_SIZE, collate_fn=collate_fn)
     for src, tgt in val_dataloader:
-        src = src.t()  # batch first
-        tgt = tgt.t()
+        src = src.t()  # batch first [batch_size, src_seq_len]
+        tgt = tgt.t()  # [batch_size, tgt_seq_len]
         src = src.to(DEVICE)
 
-        tgt_input = tgt[:, :-1]
+        tgt_input = tgt[:, :-1]  # [batch_size, tgt_seq_len-1]
         # 获取Mask矩阵
-        src_mask = get_padding_mask(src, PAD_IDX)
-        tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)
-        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))
+        src_mask = get_padding_mask(src, PAD_IDX)  # [batch_size, 1, src_seq_len]
+        tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)  # [batch_size, 1, src_seq_len-1]
+        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))  # [tgt_seq_len-1, tgt_seq_len-1]
         tgt_mask = tgt_mask.to(DEVICE)
         tgt_input = tgt_input.to(DEVICE)
         tgt = tgt.to(DEVICE)
-        # 开始训练
-        logits = model(src, tgt_input, src_mask, tgt_mask)
+        # 进入模型
+        logits = model(src, tgt_input, src_mask, tgt_mask)  # [B, L-1, TGT_VOCAB_SIZE]
         tgt_out = tgt[:, 1:]
         loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_out.reshape(-1))
         losses += loss.item()
     return losses / len(val_dataloader)
 
 
-NUM_EPOCHS = 15
+NUM_EPOCHS = 20
 # 迭代训练和验证
 for epoch in range(1, NUM_EPOCHS + 1):
     start_time = timer()
@@ -269,14 +264,13 @@ def translate(model: torch.nn.Module, src_sentence: str):
     model.eval()
     src = text_transform[SRC_LANGUAGE](src_sentence).view(-1, 1)
     num_tokens = src.shape[0]
-    src = src.t()  # batch first
-    src_mask = (torch.ones(1, num_tokens))  # 全1表示没有mask的内容
+    src = src.t()  # batch first [1, seq_len]
+    src_mask = (torch.ones(1, num_tokens))  # 全1表示没有mask的内容 [1, seq_len]
     tgt_tokens = greedy_decode(
         model, src, src_mask, max_len=num_tokens + 5, start_symbol=BOS_IDX).flatten()
     return " ".join(vocab_transform[TGT_LANGUAGE].lookup_tokens(list(tgt_tokens.cpu().numpy()))).replace("<bos>",
                                                                                                          "").replace(
         "<eos>", "")
-
 
 # 计算Blue Score
 # 首先读取测试集中的德语数据
@@ -314,6 +308,8 @@ i = 0
 total_blue_score = 0
 for candidate in en_candidate_list_tokenize:
     reference = [en_sent_tokenize[i]]
+    print("reference为：", reference)
+    print("candidate为：", candidate)
     score = sentence_bleu(reference, candidate[1:]) * 100
     total_blue_score += score
     i += 1
