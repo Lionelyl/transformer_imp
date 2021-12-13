@@ -224,7 +224,7 @@ def evaluate(model):
     return losses / len(val_dataloader)
 
 
-NUM_EPOCHS = 20
+NUM_EPOCHS = 12
 # 迭代训练和验证
 for epoch in range(1, NUM_EPOCHS + 1):
     start_time = timer()
