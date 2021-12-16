@@ -171,7 +171,7 @@ def train_epoch(model, optimizer):
         src_mask = get_padding_mask(src, PAD_IDX)  # [batch_size, 1, src_seq_len]
         src_mask = src_mask.to(DEVICE)
         tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)  # [batch_size, 1, src_seq_len-1]
-        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))  # [tgt_seq_len-1, tgt_seq_len-1]
+        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))  # [batch_size, tgt_seq_len-1, tgt_seq_len-1]
         tgt_mask = tgt_mask.to(DEVICE)
         tgt_input = tgt_input.to(DEVICE)
         tgt = tgt.to(DEVICE)
@@ -211,7 +211,7 @@ def evaluate(model):
         # 获取Mask矩阵
         src_mask = get_padding_mask(src, PAD_IDX)  # [batch_size, 1, src_seq_len]
         tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)  # [batch_size, 1, src_seq_len-1]
-        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))  # [tgt_seq_len-1, tgt_seq_len-1]
+        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))  # [batch_size, tgt_seq_len-1, tgt_seq_len-1]
         tgt_mask = tgt_mask.to(DEVICE)
         tgt_input = tgt_input.to(DEVICE)
         tgt = tgt.to(DEVICE)
@@ -239,7 +239,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
     src = src.to(DEVICE)
     src_mask = src_mask.to(DEVICE)
     memory = model.encode(src, src_mask)
-    ys = torch.ones(1, 1).fill_(start_symbol).type(torch.long)
+    ys = torch.ones(1, 1).fill_(start_symbol).type(torch.long)  # ys:[1,1] 如：[[2]]
     for i in range(max_len - 1):
         memory = memory.to(DEVICE)
         ys = ys.to("cpu")
@@ -247,12 +247,13 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
         ys = ys.to(DEVICE)
         tgt_mask = get_tgt_mask(tgt_padding_mask, ys.size(1))
         tgt_mask = tgt_mask.to(DEVICE)
-        out = model.decode(ys, memory, tgt_mask, src_mask)
-        prob = model.generator(out[:, -1])
+        out = model.decode(ys, memory, tgt_mask, src_mask)  # out:[1, x, 512]
+        prob = model.generator(out[:, -1])  # [1, vocab_size]
         _, next_word = torch.max(prob, dim=1)
-        next_word = next_word.item()
+        next_word = next_word.item()  # [预测出的word的下标]
         ys = torch.cat([ys,
                         torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
+        # ys shape:[1,x] # x为目前已预测词的数量
         if next_word == EOS_IDX:
             break
     return ys
@@ -275,16 +276,29 @@ def translate(model: torch.nn.Module, src_sentence: str):
 # 将德语翻译为英语
 print("短句：")
 print(translate(transformer, "ein Hund springt in einen See."))
-print(translate(transformer, "Arbeiter stehen vor einer Landstraße."))
-print(translate(transformer, "Ein Baseballspieler erklimmt einen Berg."))
-print(translate(transformer, "Ein Mann mit einem orangefarbenen Hut, der etwas anstarrt."))
-print(translate(transformer, "Eine Gruppe von Menschen steht vor einem Iglu ."))
-print(translate(transformer, "Eine Frau mit rötlichen Haaren springt auf eine aufblasbare Rutsche."))
-print("长句：")
-print(translate(transformer,
-                "Eine Turnerin in einem schwarzen Turnanzug，als er durch einen hübschen Blumenmarkt schlendert."))
-print(translate(transformer, "Dieses Foto zeigt einen Mann und eine Frau, die vor einer Wand stehen."))
-print(translate(transformer, "Leute Reparieren das Dach eines Hauses."))
+# print(translate(transformer, "ein Hund springt in einen See."))
+# print(translate(transformer, "Arbeiter stehen vor einer Landstraße."))
+# print(translate(transformer, "Ein Baseballspieler erklimmt einen Berg."))
+# print(translate(transformer, "Ein Mann mit einem orangefarbenen Hut, der etwas anstarrt."))
+# print(translate(transformer, "Eine Gruppe von Menschen steht vor einem Iglu ."))
+# print(translate(transformer, "Eine Frau mit rötlichen Haaren springt auf eine aufblasbare Rutsche."))
+# print(translate(transformer,
+#                 "Eine Turnerin in einem schwarzen Turnanzug，als er durch einen hübschen Blumenmarkt schlendert."))
+# print(translate(transformer, "Dieses Foto zeigt einen Mann und eine Frau, die vor einer Wand stehen."))
+# print(translate(transformer, "Leute Reparieren das Dach eines Hauses."))
+
+
+
+# print(translate(transformer, "Ein Mann in Jeans spielt an einem Strand mit einem roten Ball."))
+# print(translate(transformer, "Ein Junge in einem roten Shirt gräbt mit einer gelben Schaufel im Sand."))
+# print(translate(transformer, "Ein hellbrauner Hund läuft bergauf."))
+# print(translate(transformer, "Drei Farmer ernten Reis auf einem Feld."))
+# print(translate(transformer, "Der kleine Junge lernt mit seinem Vater, Rad zu fahren."))
+# print(translate(transformer, "Ein Mann steht auf einem steinigen Abhang und blickt auf ein Gewässer."))
+# print(translate(transformer, "Ein Mann in einem Anzug und mit Hut spielt auf der Straße Gitarre."))
+# print(translate(transformer, "Leute, die sich in einem Springbrunnen abkühlen, eine Frau in einem weißen Kleid sitzt am Rand und sieht zu."))
+# print(translate(transformer, "Ein Mann in traditionellem Gewand steht neben seinem Esel, der anscheinend auch bekleidet ist."))
+# print(translate(transformer, "Ein junger Mann in einem blauen Shirt fährt in einer städtischen Gegend über ein Geländer."))
 
 
 

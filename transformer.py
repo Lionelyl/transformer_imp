@@ -6,6 +6,29 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
+"""
+多头注意力机制
+输入：
+Encoder：
+q = k = v 都是[batch_size, src_seq_len, d_model]
+mask: [batch_size, 1, src_seq_len]
+Decoder:
+q = k = v 都是[batch_size, tgt_seq_len, d_model]
+mask:[tgt_seq_len, tgt_seq_len]
+Enc_Dec:
+q:[batch_size, tgt_seq_len, d_model]
+k:[batch_size, src_seq_len, d_model]
+v:[batch_size, src_seq_len, d_model]
+输出：
+Encoder：
+x = [batch_size, src_seq_len, d_model]
+Decoder：
+x = [batch_size, tgt_seq_len, d_model]
+Enc_Dec:
+x = [batch_size, tgt_seq_len, d_model]
+"""
+
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, embed_dim=512, num_heads=8, dropout_rate=0.1):
         super(MultiHeadAttention, self).__init__()
@@ -26,7 +49,6 @@ class MultiHeadAttention(nn.Module):
 
         self.linear_out = nn.Linear(embed_dim, embed_dim, bias=False)
 
-
     def forward(self, q, k, v, mask=None):
         """
         :param q: [batch_size, L, d_model]
@@ -38,7 +60,7 @@ class MultiHeadAttention(nn.Module):
                      enc_dec: memory_mask = src_padding_mask [B, 1, L]
         """
 
-        d_k = self.head_dim
+        d_k = self.head_dim  # 64
         d_v = self.head_dim
         batch_size = q.size(0)
 
@@ -46,28 +68,41 @@ class MultiHeadAttention(nn.Module):
         k = self.linear_k(k).view(batch_size, -1, self.num_heads, d_k)
         v = self.linear_v(v).view(batch_size, -1, self.num_heads, d_v)
 
-        q = q.transpose(1,2)                    # [batch_size, num_heads, len_q, d_k]
-        k = k.transpose(1,2).transpose(2,3)     # [batch_size, num_heads, d_k, len_k]
-        v = v.transpose(1,2)                    # [batch_size, num_heads, len_k, d_v]
+        q = q.transpose(1, 2)  # [batch_size, num_heads, len_q, d_k]
+        # Enc-Dec：q为[batch_size, num_heads, tgt_seq_len, d_k]
+        k = k.transpose(1, 2).transpose(2, 3)  # [batch_size, num_heads, d_k, len_k]
+        # Enc-Dec：k为：# [batch_size, num_heads, d_k, src_seq_len]
+        v = v.transpose(1, 2)  # [batch_size, num_heads, len_k, d_v]、
+        # Enc-Dec：v为：# [batch_size, num_heads, src_seq_len, d_v]
 
-        x = torch.matmul(q, k)                  # [batch_size, num_heads, len_q, len_k]
+        x = torch.matmul(q, k)  # [batch_size, num_heads, len_q, len_k]
+        # Enc-Dec：x为：[batch_size, num_heads, tgt_seq_len, src_seq_len]
         x.mul_(self.scale)
 
         # Mask
+        # 下面l表示src_seq_len，s表示tgt_seq_len
         # encoder: x [b, h, l, l] mask [b, 1, 1, l]  ==> [b, h, l, l]
         # enc_dec: x [b, h, s, l] mask [b, 1, 1, l]  ==> [b, h, s, l]
         # decoder: x [b, h, s, s] mask [b, 1, s, s]  ==> [b, h, s, s]
+        # q * K之后最后两个维度表示每一个词（query）对所有词的（key）作乘积得到的原始权重
         if mask is not None:
             x.masked_fill_(mask.unsqueeze(1) != 1, -1e9)
 
         x = self.softmax(x)
-        x = torch.matmul(x, v)                  # [batch_size, num_heads, len_q, d_v]
+        x = torch.matmul(x, v)  # [batch_size, num_heads, len_q, d_v]
+        # Enc-Dec：x为：[batch_size, num_heads, tgt_seq_len, d_v]
 
         x = x.transpose(1, 2).contiguous()
         x = x.view(batch_size, -1, self.num_heads * d_v)
 
         x = self.linear_out(x)
         return x
+
+
+"""
+经过全连接层输入和输出的维度都不变
+"""
+
 
 class FeedForwardNetwork(nn.Module):
     def __init__(self, d_model=512, dim_feedforward=2048, dropout_rate=0.1):
@@ -84,6 +119,16 @@ class FeedForwardNetwork(nn.Module):
         x = self.linear2(x)
         return x
 
+
+"""
+输入:
+x: [batch_size, src_seq_len, d_model]
+mask: [batch_size, 1, src_seq_len]
+输出：
+x：[batch_size, src_seq_len, d_model]
+"""
+
+
 class EncoderLayer(nn.Module):
     def __init__(self, d_model=512, num_heads=8, dim_feedforward=2048, dropout_rate=0.1):
         super(EncoderLayer, self).__init__()
@@ -99,7 +144,6 @@ class EncoderLayer(nn.Module):
         self.feed_forward_norm = nn.LayerNorm(d_model, eps=1e-6)
 
     def forward(self, x, mask):
-
         # multi-head attention
         y = self.self_attention(x, x, x, mask)
         y = self.self_attention_dropout(y)
@@ -113,6 +157,17 @@ class EncoderLayer(nn.Module):
         x = self.feed_forward_norm(y)
 
         return x
+
+
+'''
+由多个encoder_layer组成
+输入
+x: [batch_size, src_seq_len, d_model]
+mask: [batch_size, 1, src_seq_len]
+输出
+output: [batch_size, src_seq_len, d_model]
+'''
+
 
 class Encoder(nn.Module):
     def __init__(self, encoder_layer, num_layers=6):
@@ -128,6 +183,17 @@ class Encoder(nn.Module):
             output = module(output, mask)
 
         return output
+
+
+"""
+输入
+tgt:[batch_size, tgt_seq_len, d_model]
+memory: [batch_size, src_seq_len, d_model]
+tgt_mask:[batch_size, tgt_seq_len-1, tgt_seq_len-1] 
+# 实际上是[tgt_seq_len-1, tgt_seq_len-1]因为去除了最后一个结尾特殊标志
+memory_mask:[batch_size, 1, src_seq_len]
+"""
+
 
 class DecoderLayer(nn.Module):
     def __init__(self, d_model=512, num_heads=8, dim_feedforward=2048, dropout_rate=0.1):
@@ -146,14 +212,13 @@ class DecoderLayer(nn.Module):
         self.feed_forward_norm = nn.LayerNorm(d_model, eps=1e-6)
 
     def forward(self, tgt, memory, tgt_mask, memory_mask):
-
         x = tgt
 
         # self attention
         y = self.self_attention(x, x, x, tgt_mask)
         y = self.self_attention_dropout(y)
         y = y + x
-        x = self.self_attention_norm(y)
+        x = self.self_attention_norm(y)  # x:[batch_size, tgt_seq_len, d_model]
 
         # encoder-decoder attention
         y = self.enc_dec_attention(x, memory, memory, memory_mask)
@@ -169,6 +234,21 @@ class DecoderLayer(nn.Module):
 
         return x
 
+
+'''
+由多个decoder_layer组成
+输入
+tgt:[batch_size, tgt_seq_len, d_model]
+memory: [batch_size, src_seq_len, d_model]
+mask: [batch_size, 1, src_seq_len]
+tgt_mask:[batch_size, tgt_seq_len-1, tgt_seq_len-1] 
+# 实际上是[tgt_seq_len-1, tgt_seq_len-1]因为去除了最后一个结尾特殊标志
+memory_mask:[batch_size, 1, src_seq_len]
+输出
+output:[batch_size, tgt_seq_len, d_model]
+'''
+
+
 class Decoder(nn.Module):
     def __init__(self, decoder_layer, num_layers=6):
         super(Decoder, self).__init__()
@@ -177,13 +257,23 @@ class Decoder(nn.Module):
         self.layers = clone_modules(decoder_layer, num_layers)
 
     def forward(self, tgt, memory, tgt_mask, memory_mask):
-
         output = tgt
 
         for module in self.layers:
             output = module(output, memory, tgt_mask, memory_mask)
 
         return output
+
+
+'''
+输入src:[batch_size, src_seq_len, d_model]
+src_mask:[batch_size, 1, src_seq_len]
+tgt:[batch_size, tgt_seq_len, d_model]
+tgt_mask:[batch_size, tgt_seq_len-1, tgt_seq_len-1] 
+# 实际上是[batch_size, tgt_seq_len-1, tgt_seq_len-1]因为去除了最后一个结尾特殊标志
+memory_mask与src_mask相同
+'''
+
 
 class EncoderDecoder(nn.Module):
     def __init__(self, d_model=512, num_heads=8, num_encoder_layers=6, num_decoder_layers=6,
@@ -219,6 +309,13 @@ class EncoderDecoder(nn.Module):
                 nn.init.xavier_uniform_(p)
 
 
+"""
+Embedding层，在Embedding的基础上乘以根号下d_model(论文的要求)
+输入x :[batch_size, src_seq_len]
+输出:[batch_size, src_seq_len, d_model]
+"""
+
+
 class Embeddings(nn.Module):
     def __init__(self, vocab_size, d_model):
         super(Embeddings, self).__init__()
@@ -228,6 +325,15 @@ class Embeddings(nn.Module):
 
     def forward(self, x):
         return self.lut(x) * torch.sqrt(torch.tensor(self.d_model))
+
+
+'''
+位置编码层
+该层的作用是加入序列中位置的绝对信息
+输入x:[batch_size, src_seq_len, d_model]
+输入:[batch_size, src_seq_len, d_model]
+'''
+
 
 class PositionalEncoding(nn.Module):
     # "Implement the PE function."
@@ -249,6 +355,7 @@ class PositionalEncoding(nn.Module):
                          requires_grad=False)
         return self.dropout(x)
 
+
 class Generator(nn.Module):
     def __init__(self, d_model=512, vocab_size=37000):
         super(Generator, self).__init__()
@@ -256,6 +363,7 @@ class Generator(nn.Module):
 
     def forward(self, x):
         return F.log_softmax(self.proj(x), dim=-1)
+
 
 class Transformer(nn.Module):
     def __init__(self, d_model=512, num_heads=8, num_encoder_layers=6, num_decoder_layers=6,
@@ -285,12 +393,14 @@ class Transformer(nn.Module):
         return self.encoder_decoder.encode(self.position_embedding(self.src_embedding(src)), src_mask)
 
     def decode(self, tgt, memory, tgt_mask, memory_mask):
-        return self.encoder_decoder.decode(self.position_embedding(self.tgt_embedding(tgt)), memory, tgt_mask, memory_mask)
+        return self.encoder_decoder.decode(self.position_embedding(self.tgt_embedding(tgt)), memory, tgt_mask,
+                                           memory_mask)
 
     def set_parameters(self):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
+
 
 class OptimizerWithWarmUp():
     def __init__(self, model_size, warmup_steps, optimizer):
@@ -316,6 +426,7 @@ class OptimizerWithWarmUp():
     def zero_grad(self):
         self.optimizer.zero_grad()
 
+
 def get_optimizer_with_warmup(model):
     return OptimizerWithWarmUp(model_size=model.d_model, warmup_steps=4000,
                                optimizer=torch.optim.Adam(model.parameters(), lr=0, betas=(0.9, 0.98), eps=1e-9))
@@ -327,15 +438,13 @@ def clone_modules(module, N):
 
 # 得到的都是True和False的矩阵
 def get_padding_mask(target, pad):
-
-    mask = (target != pad).unsqueeze(-2) # [batch_size, 1, tgt_len]  0 means padding
+    mask = (target != pad).unsqueeze(-2)  # [batch_size, 1, tgt_len]  0 means padding
 
     return mask
 
 
 # 返回上三角为0的矩阵，其余元素为1的矩阵,工具函数
 def get_sequence_mask(target_len):
-
     ones = torch.ones(target_len, target_len, dtype=torch.uint8)
 
     mask = torch.triu(ones, diagonal=1)  # [tgt_len, tgt_len]
@@ -343,12 +452,16 @@ def get_sequence_mask(target_len):
     return 1 - mask  # lower triangular matrix: 1 means not masked, 0 means masked
 
 
+# tgt_mask: [batch_size, tgt_seq_len-1, tgt_seq_len-1]
 def get_tgt_mask(padding_mask, tgt_len):
     # padding_mask: list, len(list) = S
     if isinstance(padding_mask, list):
         padding_mask = torch.tensor(padding_mask).unsqueeze(0)
+    #  seq_mask的形状：[tgt_len, tgt_len]
+    #  padding_mask的形状：[batch_size, 1, src_seq_len]
     seq_mask = get_sequence_mask(tgt_len)
     tgt_mask = padding_mask & seq_mask
+    # tgt_mask最后的形状：[batch_size, tgt_seq_len-1, tgt_seq_len-1]
     return tgt_mask
 
 
