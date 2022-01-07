@@ -144,16 +144,16 @@ with tqdm(tt_loader) as t:
         src_mask = data['mask'].to(device)
         out = greed_decode(model, src, src_mask, max_len, sos_id, eos_id)
         # print(tokenizer.decode(out.squeeze().tolist()))
-        reference = tokenizer.decode(data['data'].squeeze().tolist())
-        reference = [tokenizer.encode(reference).tokens]
-        print(reference)
-        candidate = [tokenizer.encode(tokenizer.decode(out.squeeze().tolist())).tokens]
-        print(candidate)
-        score = bleu_score.corpus_bleu(reference, candidate)
-        print(score)
-        scores.append(score)
-        if (i>2):
+        # reference = tokenizer.decode(data['data'].squeeze().tolist())
+        # reference = [tokenizer.encode(reference).tokens]
+        # print(reference)
+        # candidate = [tokenizer.encode(tokenizer.decode(out.squeeze().tolist())).tokens]
+        # print(candidate)
+        # score = bleu_score.corpus_bleu(reference, candidate)
+        # print(score)
+        # scores.append(score)
+        if (i>4):
             break
         i += 1
-    average_bleu = sum(scores) / len(scores)
-    print(f"BLEU scores : {average_bleu:3.6f}")
+    # average_bleu = sum(scores) / len(scores)
+    # print(f"BLEU scores : {average_bleu:3.6f}")
