@@ -161,34 +161,29 @@ def train_epoch(model, optimizer):
     # 训练
     for src, tgt in train_dataloader:
         i += 1
-        src = src.t()  # batch first
-        tgt = tgt.t()
+        src = src.t()  # batch first, shape:[batch_size, src_seq_len]
+        tgt = tgt.t()  # batch first, shape:[batch_size, tgt_seq_len]
         # 如果GPU可用放在GPU上
         src = src.to(DEVICE)
         # 省去最后一个结尾特殊标志
-        tgt_input = tgt[:, :-1]
+        tgt_input = tgt[:, :-1]  # [batch_size, src_seq_len-1]
         # 获取Mask矩阵
-        src_mask = get_padding_mask(src, PAD_IDX)
+        src_mask = get_padding_mask(src, PAD_IDX)  # [batch_size, 1, src_seq_len]
         src_mask = src_mask.to(DEVICE)
-        tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)
-        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))
+        tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)  # [batch_size, 1, src_seq_len-1]
+        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))  # [batch_size, tgt_seq_len-1, tgt_seq_len-1]
         tgt_mask = tgt_mask.to(DEVICE)
         tgt_input = tgt_input.to(DEVICE)
         tgt = tgt.to(DEVICE)
         # tgt_padding_mask = tgt_padding_mask.to(DEVICE)
-        # print("src_mask:", src_mask.shape)
-        # print("tgt_mask:", tgt_mask.shape)
         # 获取模型的输出
-        # logits是没有经过softmax的模型输出的意思
         logits = model(src, tgt_input, src_mask, tgt_mask)  # [B, L-1, TGT_VOCAB_SIZE]
-        # print(logits.shape)
         # 梯度清零
         optimizer.zero_grad()
-        # 第一个是开始特殊标记
-        # 省去
+        # 省去第一个开始特殊标记
         tgt_out = tgt[:, 1:]  # [B, L-1]
         # logits.reshape(-1, logits.shape[-1])后维度变为[(seq_len-1)*batch_size,目标语言的词典大小]
-        # tgt_out.reshape(-1)后tgt_out的维度是[seq_len-1*batch_size*目标语言的词典大小]
+        # tgt_out.reshape(-1)后tgt_out的维度是[seq_len-1*batch_size]
         # tgt_out的最后一个维度是真实标签
         # 而logits的最后一个维度是对于每一个词语的预测
         loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_out.reshape(-1))
@@ -208,27 +203,27 @@ def evaluate(model):
     val_iter = Multi30k(split='valid', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
     val_dataloader = DataLoader(val_iter, batch_size=BATCH_SIZE, collate_fn=collate_fn)
     for src, tgt in val_dataloader:
-        src = src.t()  # batch first
-        tgt = tgt.t()
+        src = src.t()  # batch first [batch_size, src_seq_len]
+        tgt = tgt.t()  # [batch_size, tgt_seq_len]
         src = src.to(DEVICE)
 
-        tgt_input = tgt[:, :-1]
+        tgt_input = tgt[:, :-1]  # [batch_size, tgt_seq_len-1]
         # 获取Mask矩阵
-        src_mask = get_padding_mask(src, PAD_IDX)
-        tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)
-        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))
+        src_mask = get_padding_mask(src, PAD_IDX)  # [batch_size, 1, src_seq_len]
+        tgt_padding_mask = get_padding_mask(tgt_input, PAD_IDX)  # [batch_size, 1, src_seq_len-1]
+        tgt_mask = get_tgt_mask(tgt_padding_mask, tgt_input.size(1))  # [batch_size, tgt_seq_len-1, tgt_seq_len-1]
         tgt_mask = tgt_mask.to(DEVICE)
         tgt_input = tgt_input.to(DEVICE)
         tgt = tgt.to(DEVICE)
-        # 开始训练
-        logits = model(src, tgt_input, src_mask, tgt_mask)
+        # 进入模型
+        logits = model(src, tgt_input, src_mask, tgt_mask)  # [B, L-1, TGT_VOCAB_SIZE]
         tgt_out = tgt[:, 1:]
         loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_out.reshape(-1))
         losses += loss.item()
     return losses / len(val_dataloader)
 
 
-NUM_EPOCHS = 15
+NUM_EPOCHS = 12
 # 迭代训练和验证
 for epoch in range(1, NUM_EPOCHS + 1):
     start_time = timer()
@@ -244,7 +239,7 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
     src = src.to(DEVICE)
     src_mask = src_mask.to(DEVICE)
     memory = model.encode(src, src_mask)
-    ys = torch.ones(1, 1).fill_(start_symbol).type(torch.long)
+    ys = torch.ones(1, 1).fill_(start_symbol).type(torch.long)  # ys:[1,1] 如：[[2]]
     for i in range(max_len - 1):
         memory = memory.to(DEVICE)
         ys = ys.to("cpu")
@@ -252,12 +247,13 @@ def greedy_decode(model, src, src_mask, max_len, start_symbol):
         ys = ys.to(DEVICE)
         tgt_mask = get_tgt_mask(tgt_padding_mask, ys.size(1))
         tgt_mask = tgt_mask.to(DEVICE)
-        out = model.decode(ys, memory, tgt_mask, src_mask)
-        prob = model.generator(out[:, -1])
+        out = model.decode(ys, memory, tgt_mask, src_mask)  # out:[1, x, 512]
+        prob = model.generator(out[:, -1])  # [1, vocab_size]
         _, next_word = torch.max(prob, dim=1)
-        next_word = next_word.item()
+        next_word = next_word.item()  # [预测出的word的下标]
         ys = torch.cat([ys,
                         torch.ones(1, 1).type_as(src.data).fill_(next_word)], dim=1)
+        # ys shape:[1,x] # x为目前已预测词的数量
         if next_word == EOS_IDX:
             break
     return ys
@@ -268,8 +264,8 @@ def translate(model: torch.nn.Module, src_sentence: str):
     model.eval()
     src = text_transform[SRC_LANGUAGE](src_sentence).view(-1, 1)
     num_tokens = src.shape[0]
-    src = src.t()  # batch first
-    src_mask = (torch.ones(1, num_tokens))  # 全1表示没有mask的内容
+    src = src.t()  # batch first [1, seq_len]
+    src_mask = (torch.ones(1, num_tokens))  # 全1表示没有mask的内容 [1, seq_len]
     tgt_tokens = greedy_decode(
         model, src, src_mask, max_len=num_tokens + 5, start_symbol=BOS_IDX).flatten()
     return " ".join(vocab_transform[TGT_LANGUAGE].lookup_tokens(list(tgt_tokens.cpu().numpy()))).replace("<bos>",
@@ -280,13 +276,29 @@ def translate(model: torch.nn.Module, src_sentence: str):
 # 将德语翻译为英语
 print("短句：")
 print(translate(transformer, "ein Hund springt in einen See."))
-print(translate(transformer, "Arbeiter stehen vor einer Landstraße."))
-print(translate(transformer, "Ein Baseballspieler erklimmt einen Berg."))
-print(translate(transformer, "Ein Mann mit einem orangefarbenen Hut, der etwas anstarrt."))
-print(translate(transformer, "Eine Gruppe von Menschen steht vor einem Iglu ."))
-print(translate(transformer, "Eine Frau mit rötlichen Haaren springt auf eine aufblasbare Rutsche."))
-print("长句：")
-print(translate(transformer,
-                "Eine Turnerin in einem schwarzen Turnanzug，als er durch einen hübschen Blumenmarkt schlendert."))
-print(translate(transformer, "Dieses Foto zeigt einen Mann und eine Frau, die vor einer Wand stehen."))
-print(translate(transformer, "Leute Reparieren das Dach eines Hauses."))
+# print(translate(transformer, "ein Hund springt in einen See."))
+# print(translate(transformer, "Arbeiter stehen vor einer Landstraße."))
+# print(translate(transformer, "Ein Baseballspieler erklimmt einen Berg."))
+# print(translate(transformer, "Ein Mann mit einem orangefarbenen Hut, der etwas anstarrt."))
+# print(translate(transformer, "Eine Gruppe von Menschen steht vor einem Iglu ."))
+# print(translate(transformer, "Eine Frau mit rötlichen Haaren springt auf eine aufblasbare Rutsche."))
+# print(translate(transformer,
+#                 "Eine Turnerin in einem schwarzen Turnanzug，als er durch einen hübschen Blumenmarkt schlendert."))
+# print(translate(transformer, "Dieses Foto zeigt einen Mann und eine Frau, die vor einer Wand stehen."))
+# print(translate(transformer, "Leute Reparieren das Dach eines Hauses."))
+
+
+
+# print(translate(transformer, "Ein Mann in Jeans spielt an einem Strand mit einem roten Ball."))
+# print(translate(transformer, "Ein Junge in einem roten Shirt gräbt mit einer gelben Schaufel im Sand."))
+# print(translate(transformer, "Ein hellbrauner Hund läuft bergauf."))
+# print(translate(transformer, "Drei Farmer ernten Reis auf einem Feld."))
+# print(translate(transformer, "Der kleine Junge lernt mit seinem Vater, Rad zu fahren."))
+# print(translate(transformer, "Ein Mann steht auf einem steinigen Abhang und blickt auf ein Gewässer."))
+# print(translate(transformer, "Ein Mann in einem Anzug und mit Hut spielt auf der Straße Gitarre."))
+# print(translate(transformer, "Leute, die sich in einem Springbrunnen abkühlen, eine Frau in einem weißen Kleid sitzt am Rand und sieht zu."))
+# print(translate(transformer, "Ein Mann in traditionellem Gewand steht neben seinem Esel, der anscheinend auch bekleidet ist."))
+# print(translate(transformer, "Ein junger Mann in einem blauen Shirt fährt in einer städtischen Gegend über ein Geländer."))
+
+
+
